@@ -17,10 +17,10 @@ WORD_FILE = "words.csv"
 # Supabase DB接続
 # -----------------------
 def get_conn():
-    return psycopg.connect(
-        os.environ["DATABASE_URL"],
-        sslmode="require"
-    )
+    url = os.environ.get("DATABASE_URL")
+    if not url:
+        raise Exception("DATABASE_URL is not set")
+    return psycopg.connect(url, sslmode="require")
 
 # -----------------------
 # 単語読み込み
