@@ -1,4 +1,4 @@
-from flask import Flask, render_template, request, session, redirect
+from flask import Flask, render_template, request, session, redirect, jsonify
 import random
 import csv
 import os
@@ -6,6 +6,7 @@ import time
 import psycopg
 from datetime import datetime
 from dotenv import load_dotenv
+
 load_dotenv()
 
 app = Flask(__name__)
@@ -13,23 +14,24 @@ app.secret_key = "word_test_secret"
 
 WORD_FILE = "words.csv"
 
+
 # -----------------------
-# Supabase DB接続
+# DB接続（安定版）
 # -----------------------
 def get_conn():
     url = os.environ.get("DATABASE_URL")
     if not url:
         raise Exception("DATABASE_URL is not set")
+
     return psycopg.connect(url, sslmode="require")
 
+
 # -----------------------
-# 単語読み込み
+# 単語ロード
 # -----------------------
 word_list = []
-
 with open(WORD_FILE, encoding="cp932") as f:
     reader = csv.reader(f)
-
     for row in reader:
         if len(row) >= 2:
             word_list.append({
@@ -37,37 +39,38 @@ with open(WORD_FILE, encoding="cp932") as f:
                 "japanese": row[1].strip()
             })
 
+
 # -----------------------
-# ホーム
+# HOME
 # -----------------------
 @app.route("/")
 def start():
     return render_template("start.html")
 
+
 # -----------------------
-# 開始
+# START
 # -----------------------
 @app.route("/begin", methods=["POST"])
 def begin():
-
-    subject_id = request.form["subject_id"].strip()
-    if subject_id == "":
-        subject_id = "unknown"
-
-    questions = random.sample(word_list, len(word_list))
+    subject_id = request.form["subject_id"].strip() or "unknown"
 
     session.clear()
     session["subject_id"] = subject_id
-    session["questions"] = questions
+    session["questions"] = random.sample(word_list, len(word_list))
     session["index"] = 0
 
     return redirect("/question")
 
+
 # -----------------------
-# 問題表示
+# QUESTION
 # -----------------------
 @app.route("/question")
 def question():
+
+    if "questions" not in session:
+        return redirect("/")
 
     idx = session["index"]
     questions = session["questions"]
@@ -78,11 +81,10 @@ def question():
     q = questions[idx]
 
     choices = [q["japanese"]]
-
     while len(choices) < 4:
-        candidate = random.choice(word_list)["japanese"]
-        if candidate not in choices:
-            choices.append(candidate)
+        c = random.choice(word_list)["japanese"]
+        if c not in choices:
+            choices.append(c)
 
     random.shuffle(choices)
 
@@ -97,40 +99,38 @@ def question():
         progress=int((idx + 1) / len(questions) * 100)
     )
 
+
 # -----------------------
-# 回答保存
+# DB保存（軽量化）
 # -----------------------
 def save_result(subject_id, question_no, word, correct, reaction_time, unknown_flag):
+    try:
+        with get_conn() as conn:
+            with conn.cursor() as cur:
+                cur.execute("""
+                    INSERT INTO results
+                    (subject_id, question_no, word, correct, reaction_time, unknown_flag)
+                    VALUES (%s, %s, %s, %s, %s, %s)
+                """, (
+                    subject_id,
+                    question_no,
+                    word,
+                    correct,
+                    reaction_time,
+                    unknown_flag
+                ))
+                conn.commit()
+    except Exception as e:
+        print("DB ERROR:", e)
 
-    conn = get_conn()
-    cur = conn.cursor()
-
-    cur.execute("""
-        INSERT INTO results
-        (subject_id, question_no, word, correct, reaction_time, unknown_flag)
-        VALUES (%s, %s, %s, %s, %s, %s)
-    """, (
-        subject_id,
-        question_no,
-        word,
-        correct,
-        reaction_time,
-        unknown_flag
-    ))
-
-    conn.commit()
-    cur.close()
-    conn.close()
 
 # -----------------------
-# 回答処理
+# ANSWER
 # -----------------------
 @app.route("/answer", methods=["POST"])
 def answer():
 
-    selected = request.form.get("answer", "分からない")
-
-    if "index" not in session or "questions" not in session:
+    if "questions" not in session:
         return redirect("/")
 
     idx = session["index"]
@@ -139,17 +139,16 @@ def answer():
     if idx >= len(questions):
         return redirect("/finish")
 
+    selected = request.form.get("answer", "分からない")
     q = questions[idx]
 
     reaction_time = round(time.time() - session["start_time"], 3)
-
-    correct_word = q["japanese"]
 
     if selected == "分からない":
         correct = 0
         unknown = 1
     else:
-        correct = int(selected == correct_word)
+        correct = int(selected == q["japanese"])
         unknown = 0
 
     save_result(
@@ -164,58 +163,45 @@ def answer():
     session["index"] += 1
 
     return redirect("/question")
+
+
 # -----------------------
-# 終了＋CSV出力
+# FINISH（CSV生成）
 # -----------------------
 @app.route("/finish")
 def finish():
 
-    subject_id = session["subject_id"]
+    subject_id = session.get("subject_id", "unknown")
 
-    conn = get_conn()
-    cur = conn.cursor()
-
-    cur.execute("""
-        SELECT
-            subject_id,
-            question_no,
-            word,
-            correct,
-            reaction_time,
-            unknown_flag,
-            created_at
-        FROM results
-        WHERE subject_id = %s
-        ORDER BY question_no
-    """, (subject_id,))
-
-    rows = cur.fetchall()
-
-    cur.close()
-    conn.close()
+    with get_conn() as conn:
+        with conn.cursor() as cur:
+            cur.execute("""
+                SELECT subject_id, question_no, word, correct, reaction_time, unknown_flag
+                FROM results
+                WHERE subject_id = %s
+                ORDER BY question_no
+            """, (subject_id,))
+            rows = cur.fetchall()
 
     os.makedirs("results", exist_ok=True)
 
     timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
-
     csv_file = f"results/{subject_id}_{timestamp}.csv"
 
     with open(csv_file, "w", newline="", encoding="utf-8-sig") as f:
         writer = csv.writer(f)
-
         writer.writerow([
             "subject_id",
             "question_no",
             "word",
             "correct",
             "reaction_time",
-            "unknown_flag",
-            "created_at"
+            "unknown_flag"
         ])
-
         writer.writerows(rows)
 
-    session.clear() 
+    session.clear()
+
     return render_template(
         "finish.html",
         subject_id=subject_id,
@@ -223,8 +209,9 @@ def finish():
         csv_file=os.path.basename(csv_file)
     )
 
+
 # -----------------------
-# 起動
+# RUN
 # -----------------------
 if __name__ == "__main__":
     app.run(debug=True)
