@@ -130,8 +130,16 @@ def answer():
 
     selected = request.form.get("answer", "分からない")
 
+    if "index" not in session or "questions" not in session:
+        return redirect("/")
+
     idx = session["index"]
-    q = session["questions"][idx]
+    questions = session["questions"]
+
+    if idx >= len(questions):
+        return redirect("/finish")
+
+    q = questions[idx]
 
     reaction_time = round(time.time() - session["start_time"], 3)
 
@@ -156,7 +164,6 @@ def answer():
     session["index"] += 1
 
     return redirect("/question")
-
 # -----------------------
 # 終了＋CSV出力
 # -----------------------
@@ -208,6 +215,7 @@ def finish():
 
         writer.writerows(rows)
 
+    session.clear() 
     return render_template(
         "finish.html",
         subject_id=subject_id,
