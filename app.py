@@ -1,11 +1,11 @@
-from flask import Flask, render_template, request, session, redirect, jsonify
+from flask import Flask, render_template, request, session, redirect
 import random
 import csv
 import os
 import time
 import psycopg
-from datetime import datetime
 from dotenv import load_dotenv
+import uuid
 
 load_dotenv()
 
@@ -16,20 +16,20 @@ WORD_FILE = "words.csv"
 
 
 # -----------------------
-# DB接続（安定版）
+# DB接続
 # -----------------------
 def get_conn():
     url = os.environ.get("DATABASE_URL")
     if not url:
         raise Exception("DATABASE_URL is not set")
-
     return psycopg.connect(url, sslmode="require")
 
 
 # -----------------------
-# 単語ロード
+# 単語読み込み
 # -----------------------
 word_list = []
+
 with open(WORD_FILE, encoding="cp932") as f:
     reader = csv.reader(f)
     for row in reader:
@@ -53,10 +53,12 @@ def start():
 # -----------------------
 @app.route("/begin", methods=["POST"])
 def begin():
+
     subject_id = request.form["subject_id"].strip() or "unknown"
 
     session.clear()
     session["subject_id"] = subject_id
+    session["session_id"] = str(uuid.uuid4())  # ★実験単位
     session["questions"] = random.sample(word_list, len(word_list))
     session["index"] = 0
 
@@ -101,18 +103,20 @@ def question():
 
 
 # -----------------------
-# DB保存（軽量化）
+# DB保存のみ
 # -----------------------
-def save_result(subject_id, question_no, word, correct, reaction_time, unknown_flag):
+def save_result(subject_id, session_id, question_no, word, correct, reaction_time, unknown_flag):
+
     try:
         with get_conn() as conn:
             with conn.cursor() as cur:
                 cur.execute("""
                     INSERT INTO results
-                    (subject_id, question_no, word, correct, reaction_time, unknown_flag)
-                    VALUES (%s, %s, %s, %s, %s, %s)
+                    (subject_id, session_id, question_no, word, correct, reaction_time, unknown_flag)
+                    VALUES (%s, %s, %s, %s, %s, %s, %s)
                 """, (
                     subject_id,
+                    session_id,
                     question_no,
                     word,
                     correct,
@@ -153,6 +157,7 @@ def answer():
 
     save_result(
         session["subject_id"],
+        session["session_id"],
         idx + 1,
         q["english"],
         correct,
@@ -166,52 +171,11 @@ def answer():
 
 
 # -----------------------
-# FINISH（CSV生成）
+# FINISH（DBのみ）
 # -----------------------
 @app.route("/finish")
 def finish():
 
-    subject_id = session.get("subject_id", "unknown")
-
-    with get_conn() as conn:
-        with conn.cursor() as cur:
-            cur.execute("""
-                SELECT subject_id, question_no, word, correct, reaction_time, unknown_flag
-                FROM results
-                WHERE subject_id = %s
-                ORDER BY question_no
-            """, (subject_id,))
-            rows = cur.fetchall()
-
-    os.makedirs("results", exist_ok=True)
-
-    timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
-    csv_file = f"results/{subject_id}_{timestamp}.csv"
-
-    with open(csv_file, "w", newline="", encoding="utf-8-sig") as f:
-        writer = csv.writer(f)
-        writer.writerow([
-            "subject_id",
-            "question_no",
-            "word",
-            "correct",
-            "reaction_time",
-            "unknown_flag"
-        ])
-        writer.writerows(rows)
-
     session.clear()
 
-    return render_template(
-        "finish.html",
-        subject_id=subject_id,
-        count=len(rows),
-        csv_file=os.path.basename(csv_file)
-    )
-
-
-# -----------------------
-# RUN
-# -----------------------
-if __name__ == "__main__":
-    app.run(debug=True)
+    return render_template("finish.html")
