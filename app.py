@@ -5,6 +5,8 @@ import os
 import time
 import psycopg
 from datetime import datetime
+from dotenv import load_dotenv
+load_dotenv()
 
 app = Flask(__name__)
 app.secret_key = "word_test_secret"
@@ -15,7 +17,10 @@ WORD_FILE = "words.csv"
 # Supabase DB接続
 # -----------------------
 def get_conn():
-    return psycopg.connect(os.environ["DATABASE_URL"])
+    return psycopg.connect(
+        os.environ["DATABASE_URL"],
+        sslmode="require"
+    )
 
 # -----------------------
 # 単語読み込み
