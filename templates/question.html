@@ -1,0 +1,142 @@
+<!DOCTYPE html>
+<html>
+<head>
+<meta charset="utf-8">
+<title>問題</title>
+
+<style>
+
+body{
+    font-family:Arial;
+    text-align:center;
+    margin:30px;
+}
+
+.word{
+    font-size:60px;
+    margin:50px;
+}
+
+.grid{
+    display:grid;
+    grid-template-columns:1fr 1fr;
+    gap:15px;
+    max-width:900px;
+    margin:auto;
+}
+
+.choice{
+    font-size:24px;
+    padding:20px;
+    cursor:pointer;
+}
+
+.unknown{
+    margin-top:20px;
+    width:min(90vw,600px);
+    font-size:24px;
+    padding:20px;
+}
+
+.timer{
+    font-size:24px;
+    color:red;
+}
+
+progress{
+    width:70%;
+    height:30px;
+}
+
+</style>
+</head>
+
+<body>
+
+<h2>{{number}} / {{total}}</h2>
+
+<progress value="{{number}}" max="{{total}}"></progress>
+
+<h3>{{progress}} %</h3>
+
+<div class="timer">
+残り時間:
+<span id="countdown">5.0</span>
+秒
+</div>
+
+<div class="word">
+{{word}}
+</div>
+
+<form id="answerForm" action="/answer" method="post">
+
+<div class="grid">
+
+{% for c in choices %}
+
+<button
+class="choice"
+type="submit"
+name="answer"
+value="{{c}}">
+{{c}}
+</button>
+
+{% endfor %}
+
+</div>
+
+<br>
+
+<button
+class="unknown"
+type="submit"
+name="answer"
+value="分からない">
+分からない
+</button>
+
+</form>
+
+<script>
+
+let timeLeft = 5.0;
+
+const countdown =
+document.getElementById("countdown");
+
+const timer = setInterval(function(){
+
+    timeLeft -= 0.1;
+
+    countdown.innerHTML =
+        timeLeft.toFixed(1);
+
+    if(timeLeft <= 0){
+
+        clearInterval(timer);
+
+        const form =
+            document.getElementById(
+                "answerForm"
+            );
+
+        const hidden =
+            document.createElement("input");
+
+        hidden.type = "hidden";
+        hidden.name = "answer";
+        hidden.value = "分からない";
+
+        form.appendChild(hidden);
+
+        form.submit();
+    }
+
+},100);
+
+</script>
+
+</body>
+</html>
